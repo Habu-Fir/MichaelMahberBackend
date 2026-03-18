@@ -13,7 +13,8 @@ import dashboardRoutes from './routes/dashboard.routes';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+// Convert PORT to number explicitly
+const PORT = parseInt(process.env.PORT || '5000', 10);
 
 // =====================
 // Middleware
@@ -22,8 +23,8 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use(cors({
-  origin: '*', // allow all for now (safe for testing)
-  credentials: true
+    origin: '*', // allow all for now (safe for testing)
+    credentials: true
 }));
 
 // =====================
@@ -39,33 +40,43 @@ app.use('/api/dashboard', dashboardRoutes);
 // Health Check
 // =====================
 app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    message: 'Server is running'
-  });
+    res.status(200).json({
+        status: 'OK',
+        message: 'Server is running'
+    });
 });
 
 // =====================
 // Error Handler
 // =====================
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error(err.stack);
-  res.status(err.status || 500).json({
-    success: false,
-    message: err.message || 'Server Error'
-  });
+    console.error(err.stack);
+    res.status(err.status || 500).json({
+        success: false,
+        message: err.message || 'Server Error'
+    });
 });
 
 // =====================
-// START SERVER FIRST
+// START SERVER FIRST - FIXED: Type-safe port binding
 // =====================
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on port ${PORT} (binding to 0.0.0.0)`);
+    console.log(`🌍 Health check available at http://0.0.0.0:${PORT}/health`);
+    console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
 // =====================
 // THEN CONNECT DATABASE
 // =====================
-mongoose.connect(process.env.MONGODB_URI as string)
-  .then(() => console.log('✅ MongoDB connected'))
-  .catch((err) => console.error('❌ MongoDB connection error:', err));
+if (!process.env.MONGODB_URI) {
+    console.error('❌ MONGODB_URI environment variable is not defined');
+    process.exit(1);
+}
+
+mongoose.connect(process.env.MONGODB_URI)
+    .then(() => console.log('✅ MongoDB connected'))
+    .catch((err) => {
+        console.error('❌ MongoDB connection error:', err);
+        process.exit(1);
+    });
