@@ -228,6 +228,7 @@ import express from 'express';
 import { body } from 'express-validator';
 import { protect, authorize } from '../middleware/auth';
 import {
+  getLoans,           // ✅ ADD THIS IMPORT
   requestLoan,
   getMyLoans,
   getLoanById,
@@ -251,11 +252,11 @@ const validateLoanRequest = [
   body('principal')
     .notEmpty().withMessage('Principal amount is required')
     .isFloat({ min: 100 }).withMessage('Principal must be at least 100 ETB'),
-  
+
   body('purpose')
     .notEmpty().withMessage('Purpose is required')
     .isIn(['business', 'education', 'medical', 'home', 'debt', 'other']).withMessage('Invalid purpose'),
-  
+
   body('notes')
     .optional()
     .isString().withMessage('Notes must be text')
@@ -267,15 +268,15 @@ const validatePaymentRequest = [
   body('amount')
     .notEmpty().withMessage('Payment amount is required')
     .isFloat({ min: 1 }).withMessage('Payment must be at least 1 ETB'),
-  
+
   body('paymentMethod')
     .notEmpty().withMessage('Payment method is required')
     .isIn(['cash', 'bank', 'mobile']).withMessage('Invalid payment method'),
-  
+
   body('receiptUrl')
     .optional()
     .isURL().withMessage('Receipt URL must be valid'),
-  
+
   body('notes')
     .optional()
     .isString().withMessage('Notes must be text')
@@ -287,11 +288,11 @@ const validateApprovePayment = [
   body('paymentIndex')
     .notEmpty().withMessage('Payment index is required')
     .isInt({ min: 0 }).withMessage('Payment index must be a positive number'),
-  
+
   body('approve')
     .notEmpty().withMessage('Approve flag is required')
     .isBoolean().withMessage('Approve must be true or false'),
-  
+
   body('notes')
     .optional()
     .isString().withMessage('Notes must be text')
@@ -304,40 +305,40 @@ router.post('/test/advance-days/:id/:days', authorize('super_admin'), async (req
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const daysParam = Array.isArray(req.params.days) ? req.params.days[0] : req.params.days;
-    
+
     const daysNum = parseInt(daysParam);
-    
+
     if (isNaN(daysNum) || daysNum <= 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Days must be a positive number' 
+      return res.status(400).json({
+        success: false,
+        message: 'Days must be a positive number'
       });
     }
-    
+
     const loan = await Loan.findById(id);
     if (!loan) {
       return res.status(404).json({ success: false, message: 'Loan not found' });
     }
-    
+
     if (loan.status !== 'active') {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Loan must be active to accrue interest' 
+      return res.status(400).json({
+        success: false,
+        message: 'Loan must be active to accrue interest'
       });
     }
-    
+
     const dailyRate = (loan.interestRate / 100) / 30;
     const newInterest = loan.remainingPrincipal * dailyRate * daysNum;
     const roundedInterest = Math.round(newInterest * 100) / 100;
-    
+
     loan.interestAccrued += roundedInterest;
-    
+
     const newDate = new Date(loan.lastInterestCalculation);
     newDate.setDate(newDate.getDate() + daysNum);
     loan.lastInterestCalculation = newDate;
-    
+
     await loan.save();
-    
+
     res.json({
       success: true,
       message: `Advanced ${daysNum} days, added ${roundedInterest.toFixed(2)} interest`,
@@ -354,8 +355,9 @@ router.post('/test/advance-days/:id/:days', authorize('super_admin'), async (req
 });
 
 // ==================== PUBLIC ROUTES (Any authenticated user) ====================
-router.get('/', getMyLoans);
-router.get('/my', getMyLoans);
+// ✅ FIXED: / route now calls getLoans (returns ALL loans with pagination)
+router.get('/', getLoans);           // ✅ This is the main endpoint - returns all loans
+router.get('/my', getMyLoans);       // ✅ This returns only current user's loans
 router.get('/:id', getLoanById);
 
 // ==================== MEMBER ROUTES ====================
@@ -368,7 +370,7 @@ router.put('/:id/approve', authorize('approver', 'super_admin'), approveLoan);
 
 // ==================== SUPER ADMIN ROUTES ====================
 router.post('/:id/disburse', authorize('super_admin'), disburseLoan);
-router.post('/:id/approve-payment', authorize('super_admin'), validateApprovePayment, approvePayment); // 👈 THIS MUST EXIST
+router.post('/:id/approve-payment', authorize('super_admin'), validateApprovePayment, approvePayment);
 router.get('/admin/pending-payments', authorize('super_admin'), getPendingPayments);
 
 export default router;
