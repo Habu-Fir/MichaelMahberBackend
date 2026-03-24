@@ -9,6 +9,7 @@ import userRoutes from './routes/user.routes';
 import loanRoutes from './routes/loan.routes';
 import contributionRoutes from './routes/contribution.routes';
 import dashboardRoutes from './routes/dashboard.routes';
+import systemRoutes from './routes/system.routes';
 
 dotenv.config();
 
@@ -30,6 +31,7 @@ app.use(cors({
 // =====================
 // Routes
 // =====================
+app.use('/api/system', systemRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/loans', loanRoutes);

@@ -229,7 +229,6 @@ import { body } from 'express-validator';
 import { protect, authorize } from '../middleware/auth';
 import {
   requestLoan,
-  getLoans,
   getMyLoans,
   getLoanById,
   signLoan,
@@ -355,7 +354,7 @@ router.post('/test/advance-days/:id/:days', authorize('super_admin'), async (req
 });
 
 // ==================== PUBLIC ROUTES (Any authenticated user) ====================
-router.get('/', getLoans);
+router.get('/', getMyLoans);
 router.get('/my', getMyLoans);
 router.get('/:id', getLoanById);
 

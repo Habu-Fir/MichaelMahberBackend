@@ -5,6 +5,8 @@ import asyncHandler from '../utils/asyncHandler';
 import ErrorResponse from '../utils/errorResponse';
 import { AuthRequest } from '../middleware/auth';
 import { generateLoanNumber } from '../utils/generateLoanNumber';
+import systemConfigService from '../services/systemConfig.service';
+
 
 // ==================== HELPER FUNCTIONS ====================
 const getDailyRate = (monthlyRate: number): number => {
@@ -12,6 +14,7 @@ const getDailyRate = (monthlyRate: number): number => {
 };
 
 // ==================== REQUEST LOAN ====================
+// Update requestLoan function
 export const requestLoan = asyncHandler(async (
     req: AuthRequest,
     res: Response,
@@ -29,6 +32,16 @@ export const requestLoan = asyncHandler(async (
 
     if (!purpose) {
         return next(new ErrorResponse('Loan purpose is required', 400));
+    }
+
+    // NEW: Check if loan amount is available
+    const isAvailable = await systemConfigService.isLoanAmountAvailable(principal);
+    if (!isAvailable) {
+        const totalAvailable = await systemConfigService.getTotalAvailable();
+        return next(new ErrorResponse(
+            `Insufficient funds. Total available: ${totalAvailable.toLocaleString()} ETB. Your requested amount: ${principal.toLocaleString()} ETB`,
+            400
+        ));
     }
 
     const totalMembers = await User.countDocuments({
@@ -52,7 +65,7 @@ export const requestLoan = asyncHandler(async (
         memberId,
         memberName: member.name,
         principal,
-        interestRate: 1.5, // Changed from 3% to 1.5%
+        interestRate: 1.5,
         remainingPrincipal: principal,
         requiredSignatures,
         purpose,
@@ -79,59 +92,12 @@ export const requestLoan = asyncHandler(async (
             loanNumber: loan.loanNumber,
             principal: loan.principal,
             requiredSignatures: loan.requiredSignatures,
-            status: loan.status
+            status: loan.status,
+            totalAvailable: await systemConfigService.getTotalAvailable()
         }
     });
 });
 
-// ==================== GET ALL LOANS ====================
-export const getLoans = asyncHandler(async (
-    req: AuthRequest,
-    res: Response,
-    next: NextFunction
-) => {
-    const { status, memberId, page = 1, limit = 10 } = req.query;
-
-    const filter: any = {};
-
-    // Apply status filter ONLY if specifically requested
-    if (status && status !== 'all') {
-        filter.status = status;
-    }
-    // If no status filter, return ALL loans including 'payment_pending'
-
-    if (memberId) filter.memberId = memberId;
-
-    console.log('📋 User accessing loans:', {
-        userId: req.user?._id,
-        role: req.user?.role,
-        filter
-    });
-
-    const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
-
-    const [loans, total] = await Promise.all([
-        Loan.find(filter)
-            .populate('memberId', 'name email')
-            .populate('signatures.memberId', 'name')
-            .populate('paymentHistory.approvedBy', 'name')
-            .skip(skip)
-            .limit(parseInt(limit as string))
-            .sort('-requestDate'),
-        Loan.countDocuments(filter)
-    ]);
-
-    console.log(`✅ Returning ${loans.length} loans to user with role: ${req.user?.role}`);
-
-    res.status(200).json({
-        success: true,
-        count: loans.length,
-        total,
-        page: parseInt(page as string),
-        pages: Math.ceil(total / parseInt(limit as string)),
-        data: loans
-    });
-});
 
 // ==================== GET LOAN BY ID ====================
 // FIXED: Handle null memberId gracefully

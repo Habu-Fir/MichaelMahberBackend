@@ -4,6 +4,7 @@ import User from '../models/User';
 import asyncHandler from '../utils/asyncHandler';
 import ErrorResponse from '../utils/errorResponse';
 import { AuthRequest } from '../middleware/auth';
+import systemConfigService from '../services/systemConfig.service';
 import path from 'path';
 import fs from 'fs';
 
@@ -135,6 +136,7 @@ export const uploadReceipt = asyncHandler(async (
  * 
  * Super Admin verifies payment and marks as paid
  */
+// Update verifyContribution function
 export const verifyContribution = asyncHandler(async (
     req: AuthRequest,
     res: Response,
@@ -148,12 +150,10 @@ export const verifyContribution = asyncHandler(async (
         return next(new ErrorResponse('Contribution not found', 404));
     }
 
-    // Check if already paid
     if (contribution.status === 'paid') {
         return next(new ErrorResponse('This contribution is already verified', 400));
     }
 
-    // Check if receipt exists
     if (!contribution.receipt) {
         return next(new ErrorResponse('No receipt uploaded yet', 400));
     }
@@ -166,6 +166,9 @@ export const verifyContribution = asyncHandler(async (
     contribution.notes = notes || contribution.notes;
 
     await contribution.save();
+
+    // NEW: Update system config with this contribution
+    await systemConfigService.updateContributions(contribution.amount);
 
     res.status(200).json({
         success: true,
