@@ -13,8 +13,54 @@ const getDailyRate = (monthlyRate: number): number => {
     return (monthlyRate / 100) / 30;
 };
 
+// ==================== GET ALL LOANS (with pagination and filters) ====================
+export const getLoans = asyncHandler(async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    const { status, memberId, page = 1, limit = 100 } = req.query;
+
+    // Build filter
+    const filter: any = {};
+
+    // Apply status filter ONLY if specifically requested
+    if (status && status !== 'all') {
+        filter.status = status;
+    }
+    // If no status filter or status === 'all', return ALL loans
+
+    if (memberId) filter.memberId = memberId;
+
+    console.log('📋 GET LOANS - Filter:', filter);
+    console.log('📋 Page:', page, 'Limit:', limit);
+
+    const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
+
+    const [loans, total] = await Promise.all([
+        Loan.find(filter)
+            .populate('memberId', 'name email')
+            .populate('signatures.memberId', 'name')
+            .populate('paymentHistory.approvedBy', 'name')
+            .skip(skip)
+            .limit(parseInt(limit as string))
+            .sort('-requestDate'),
+        Loan.countDocuments(filter)
+    ]);
+
+    console.log(`✅ Found ${loans.length} loans, Total in DB: ${total}`);
+
+    res.status(200).json({
+        success: true,
+        count: loans.length,
+        total,
+        page: parseInt(page as string),
+        pages: Math.ceil(total / parseInt(limit as string)),
+        data: loans
+    });
+});
+
 // ==================== REQUEST LOAN ====================
-// Update requestLoan function
 export const requestLoan = asyncHandler(async (
     req: AuthRequest,
     res: Response,
@@ -34,7 +80,7 @@ export const requestLoan = asyncHandler(async (
         return next(new ErrorResponse('Loan purpose is required', 400));
     }
 
-    // NEW: Check if loan amount is available
+    // Check if loan amount is available
     const isAvailable = await systemConfigService.isLoanAmountAvailable(principal);
     if (!isAvailable) {
         const totalAvailable = await systemConfigService.getTotalAvailable();
@@ -98,9 +144,7 @@ export const requestLoan = asyncHandler(async (
     });
 });
 
-
 // ==================== GET LOAN BY ID ====================
-// FIXED: Handle null memberId gracefully
 export const getLoanById = asyncHandler(async (
     req: AuthRequest,
     res: Response,
@@ -110,11 +154,6 @@ export const getLoanById = asyncHandler(async (
 
     console.log('\n🔍 ===== GET LOAN BY ID =====');
     console.log('Requested loan ID:', id);
-    console.log('User making request:', {
-        id: req.user?._id,
-        email: req.user?.email,
-        role: req.user?.role
-    });
 
     // Validate if ID is a valid MongoDB ObjectId
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
@@ -133,32 +172,12 @@ export const getLoanById = asyncHandler(async (
             return next(new ErrorResponse('Loan not found', 404));
         }
 
-        // Handle case where memberId is null
-        if (!loan.memberId) {
-            console.log('⚠️ Loan has null memberId:', {
-                loanId: loan._id,
-                loanNumber: loan.loanNumber,
-                memberName: loan.memberName || 'Unknown'
-            });
-
-            // Return loan with null memberId handled
-            return res.status(200).json({
-                success: true,
-                data: {
-                    ...loan.toObject(),
-                    memberId: null,
-                    memberName: loan.memberName || 'Deleted Member'
-                }
-            });
-        }
-
         console.log('📊 Loan found:', {
             loanId: loan._id,
             loanNumber: loan.loanNumber,
-            memberId: loan.memberId._id,
             memberName: loan.memberName,
             status: loan.status,
-            interestRate: loan.interestRate // Log the interest rate
+            principal: loan.principal
         });
 
         res.status(200).json({
@@ -172,7 +191,6 @@ export const getLoanById = asyncHandler(async (
 });
 
 // ==================== GET MY LOANS ====================
-// Keep this for backward compatibility, but main getAllLoans is now for everyone
 export const getMyLoans = asyncHandler(async (
     req: AuthRequest,
     res: Response,
@@ -204,17 +222,14 @@ export const signLoan = asyncHandler(async (
         return next(new ErrorResponse('Loan not found', 404));
     }
 
-    // Can only sign pending loans
     if (loan.status !== 'pending') {
         return next(new ErrorResponse('This loan is not available for signing', 400));
     }
 
-    // Members cannot sign their own loan
     if (loan.memberId.toString() === memberId?.toString()) {
         return next(new ErrorResponse('You cannot sign your own loan request', 400));
     }
 
-    // Check if already signed
     const alreadySigned = loan.signatures.some(
         sig => sig.memberId.toString() === memberId?.toString()
     );
@@ -223,14 +238,12 @@ export const signLoan = asyncHandler(async (
         return next(new ErrorResponse('You have already signed this loan', 400));
     }
 
-    // Add signature
     loan.signatures.push({
         memberId: memberId!,
         signedAt: new Date(),
         memberName
     });
 
-    // Check if we've reached required signatures (>50%)
     if (loan.signatures.length >= loan.requiredSignatures) {
         loan.status = 'ready_for_approval';
         console.log(`🎉 Loan reached ${loan.signatures.length} signatures -> ready_for_approval`);
@@ -401,62 +414,38 @@ export const approvePayment = asyncHandler(async (
 
     console.log('\n✅ ===== APPROVE PAYMENT =====');
     console.log('Request params:', { id });
-    console.log('Request body:', { paymentIndex, approve, notes, type: typeof paymentIndex });
-    console.log('User:', { id: superAdminId, role: req.user?.role });
+    console.log('Request body:', { paymentIndex, approve, notes });
 
     // Validate required fields
     if (paymentIndex === undefined || paymentIndex === null) {
-        console.log('❌ Payment index is missing');
         return next(new ErrorResponse('Payment index is required', 400));
     }
 
     if (typeof paymentIndex !== 'number') {
-        console.log('❌ Payment index must be a number, received:', typeof paymentIndex);
         return next(new ErrorResponse('Payment index must be a number', 400));
     }
 
     if (approve === undefined || approve === null) {
-        console.log('❌ Approve flag is missing');
         return next(new ErrorResponse('Approve flag is required', 400));
     }
 
     const loan = await Loan.findById(id);
 
     if (!loan) {
-        console.log('❌ Loan not found for id:', id);
         return next(new ErrorResponse('Loan not found', 404));
     }
 
-    console.log('📊 Loan found:', {
-        loanId: loan._id,
-        loanNumber: loan.loanNumber,
-        status: loan.status,
-        interestRate: loan.interestRate,
-        pendingPaymentsCount: loan.pendingPayments?.length
-    });
-
     if (!loan.pendingPayments || loan.pendingPayments.length === 0) {
-        console.log('❌ No pending payments found for loan');
         return next(new ErrorResponse('No pending payments found', 400));
     }
 
-    // Check if paymentIndex is valid
     if (paymentIndex < 0 || paymentIndex >= loan.pendingPayments.length) {
-        console.log('❌ Invalid payment index:', paymentIndex, 'Available indices:', loan.pendingPayments.length);
         return next(new ErrorResponse(`Invalid payment index. Must be between 0 and ${loan.pendingPayments.length - 1}`, 400));
     }
 
     const pendingPayment = loan.pendingPayments[paymentIndex];
 
-    console.log('📊 Pending payment found:', {
-        amount: pendingPayment.amount,
-        method: pendingPayment.paymentMethod,
-        status: pendingPayment.status,
-        requestedAt: pendingPayment.requestedAt
-    });
-
     if (pendingPayment.status !== 'pending') {
-        console.log('❌ Payment already processed. Current status:', pendingPayment.status);
         return next(new ErrorResponse('This payment has already been processed', 400));
     }
 
@@ -472,7 +461,6 @@ export const approvePayment = asyncHandler(async (
         }
 
         await loan.save();
-        console.log('✅ Payment rejected successfully');
 
         return res.json({
             success: true,
@@ -484,19 +472,13 @@ export const approvePayment = asyncHandler(async (
         });
     }
 
-    // ===== APPROVE PAYMENT - NOW UPDATE THE LOAN =====
+    // ===== APPROVE PAYMENT =====
     console.log('💰 Processing payment approval...');
 
-    const dailyRate = getDailyRate(loan.interestRate); // Now uses 1.5% monthly rate
+    const dailyRate = getDailyRate(loan.interestRate);
     const now = new Date();
     const lastCalc = loan.lastInterestCalculation || loan.disbursementDate || loan.requestDate;
     const daysDiff = Math.floor((now.getTime() - lastCalc.getTime()) / (1000 * 60 * 60 * 24));
-
-    console.log('📅 Interest calculation:', {
-        interestRate: `${loan.interestRate}% monthly`,
-        dailyRate: `${(dailyRate * 100).toFixed(4)}% daily`,
-        daysDiff
-    });
 
     let newInterest = 0;
     if (daysDiff > 0) {
@@ -550,6 +532,11 @@ export const approvePayment = asyncHandler(async (
     pendingPayment.reviewedAt = now;
     pendingPayment.reviewNotes = notes || 'Payment approved';
 
+    // Update interest in system config
+    if (interestPortion > 0) {
+        await systemConfigService.updateInterest(interestPortion);
+    }
+
     const remainingUnpaidInterest = loan.interestAccrued - loan.interestPaid;
     if (loan.remainingPrincipal <= 0 && remainingUnpaidInterest <= 0.01) {
         loan.status = 'completed';
@@ -588,30 +575,16 @@ export const getPendingPayments = asyncHandler(async (
         return next(new ErrorResponse('Not authorized to view pending payments', 403));
     }
 
-    // Find loans that have at least one pending payment
     const loans = await Loan.find({
-        'pendingPayments.status': 'pending'  // Only loans with pending payments
+        'pendingPayments.status': 'pending'
     })
         .populate('memberId', 'name email')
         .select('loanNumber memberName principal remainingPrincipal interestRate pendingPayments');
 
-    console.log(`📋 Found ${loans.length} loans with pending payments`);
-
-    // Extract ONLY pending payments (filter out approved/rejected)
     const pendingPaymentsList = loans.flatMap(loan => {
-        // Filter to get only pending payments
         const pendingPayments = loan.pendingPayments?.filter(p => p.status === 'pending') || [];
 
-        console.log(`🔍 Processing loan ${loan.loanNumber}:`, {
-            totalPayments: loan.pendingPayments?.length,
-            pendingCount: pendingPayments.length,
-            pendingAmounts: pendingPayments.map(p => p.amount),
-            interestRate: `${loan.interestRate}%` // Include interest rate in logs
-        });
-
-        // Map each pending payment to the response format
         return pendingPayments.map((p, index) => {
-            // Find the original index in the full array (for reference)
             const originalIndex = loan.pendingPayments?.findIndex(payment =>
                 payment.requestedAt === p.requestedAt && payment.amount === p.amount
             ) || 0;
@@ -621,7 +594,7 @@ export const getPendingPayments = asyncHandler(async (
                 loanNumber: loan.loanNumber,
                 memberName: loan.memberName,
                 remainingPrincipal: loan.remainingPrincipal,
-                interestRate: loan.interestRate, // Include interest rate in response
+                interestRate: loan.interestRate,
                 payment: {
                     amount: p.amount,
                     paymentMethod: p.paymentMethod,
@@ -629,14 +602,12 @@ export const getPendingPayments = asyncHandler(async (
                     notes: p.notes,
                     requestedAt: p.requestedAt,
                     status: p.status,
-                    index: originalIndex,  // Use original index for reference
-                    displayIndex: index     // Display index for UI
+                    index: originalIndex,
+                    displayIndex: index
                 }
             };
         });
     });
-
-    console.log(`📊 Returning ${pendingPaymentsList.length} pending payments`);
 
     res.status(200).json({
         success: true,
