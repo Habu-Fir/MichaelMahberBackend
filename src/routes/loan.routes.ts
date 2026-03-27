@@ -243,7 +243,7 @@ import {
   initiateDashenPayment,
   dashenPaymentCallback,
   checkDashenPaymentStatus
-} from '../controllers/dashenPayment.Controller';
+} from '../controllers/dashen_payment.controller';
 import Loan from '../models/Loan';
 
 const router = express.Router();
