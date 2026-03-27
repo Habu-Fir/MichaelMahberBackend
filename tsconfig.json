@@ -16,7 +16,7 @@
     },
     "include": [
         "src/**/*"
-    ],
+, "test-deployment.js"    ],
     "exclude": [
         "node_modules",
         "dist"

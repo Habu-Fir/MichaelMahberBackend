@@ -396,5 +396,17 @@ router.get(
   protect,
   checkDashenPaymentStatus
 );
+router.get('/test-version', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Latest code is running!',
+    timestamp: new Date().toISOString(),
+    dashenRoutes: [
+      'POST /dashen-payment/initiate',
+      'POST /dashen-payment/callback',
+      'GET /dashen-payment/status/:orderId'
+    ]
+  });
+});
 
 export default router;
