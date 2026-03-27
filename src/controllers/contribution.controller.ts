@@ -5,8 +5,6 @@ import asyncHandler from '../utils/asyncHandler';
 import ErrorResponse from '../utils/errorResponse';
 import { AuthRequest } from '../middleware/auth';
 import systemConfigService from '../services/systemConfig.service';
-import path from 'path';
-import fs from 'fs';
 
 /**
  * =========================
@@ -15,8 +13,8 @@ import fs from 'fs';
  * @route   POST /api/contributions/generate
  * @access  Private/Admin/SuperAdmin
  * 
- * Creates a "pending" contribution for every active member
- * Run this on the 1st of each month
+ * Creates a "pending" contribution record for every active member
+ * Amount is set to 0 initially - member will specify amount when uploading receipt
  */
 export const generateMonthlyContributions = asyncHandler(async (
     req: AuthRequest,
@@ -46,14 +44,14 @@ export const generateMonthlyContributions = asyncHandler(async (
         return next(new ErrorResponse('No active members found', 404));
     }
 
-    // Create contribution for each member
+    // Create contribution for each member - amount set to 0 initially
     const contributions = await Promise.all(
         members.map(member =>
             Contribution.create({
                 memberId: member._id,
                 month,
                 year,
-                amount: 1000, // Fixed amount
+                amount: 0,
                 status: 'pending'
             })
         )
@@ -61,7 +59,7 @@ export const generateMonthlyContributions = asyncHandler(async (
 
     res.status(201).json({
         success: true,
-        message: `Generated ${contributions.length} contributions for ${month}/${year}`,
+        message: `Generated ${contributions.length} contribution records for ${month}/${year}`,
         data: {
             count: contributions.length,
             month,
@@ -77,7 +75,7 @@ export const generateMonthlyContributions = asyncHandler(async (
  * @route   POST /api/contributions/:id/receipt
  * @access  Private (Member who owns it)
  * 
- * Member uploads proof of payment
+ * Member uploads proof of payment with amount
  */
 export const uploadReceipt = asyncHandler(async (
     req: AuthRequest,
@@ -85,10 +83,17 @@ export const uploadReceipt = asyncHandler(async (
     next: NextFunction
 ) => {
     const { id } = req.params;
+    const { amount, notes } = req.body;
 
     // Check if file was uploaded
     if (!req.file) {
         return next(new ErrorResponse('Please upload a receipt file', 400));
+    }
+
+    // Validate amount - must be positive number
+    const contributionAmount = Number(amount);
+    if (isNaN(contributionAmount) || contributionAmount <= 0) {
+        return next(new ErrorResponse('Please enter a valid contribution amount greater than 0', 400));
     }
 
     // Find the contribution
@@ -107,12 +112,14 @@ export const uploadReceipt = asyncHandler(async (
         return next(new ErrorResponse('This contribution is already paid', 400));
     }
 
-    // Update contribution with receipt info
+    // Update contribution with receipt info and amount
     contribution.receipt = req.file.path;
     contribution.receiptFileName = req.file.originalname;
     contribution.receiptMimeType = req.file.mimetype;
     contribution.uploadedBy = req.user._id;
-    contribution.status = 'pending'; // Still pending until verified
+    contribution.amount = contributionAmount;
+    contribution.notes = notes || contribution.notes;
+    contribution.status = 'pending';
 
     await contribution.save();
 
@@ -121,6 +128,7 @@ export const uploadReceipt = asyncHandler(async (
         message: 'Receipt uploaded successfully. Awaiting verification.',
         data: {
             id: contribution._id,
+            amount: contribution.amount,
             status: contribution.status,
             receipt: contribution.receipt
         }
@@ -135,8 +143,8 @@ export const uploadReceipt = asyncHandler(async (
  * @access  Private/SuperAdmin ONLY
  * 
  * Super Admin verifies payment and marks as paid
+ * Updates the total contributions in system config
  */
-// Update verifyContribution function
 export const verifyContribution = asyncHandler(async (
     req: AuthRequest,
     res: Response,
@@ -167,7 +175,7 @@ export const verifyContribution = asyncHandler(async (
 
     await contribution.save();
 
-    // NEW: Update system config with this contribution
+    // Update system config with this contribution amount
     await systemConfigService.updateContributions(contribution.amount);
 
     res.status(200).json({
@@ -313,7 +321,7 @@ export const getContributionSummary = asyncHandler(async (
         { $sort: { _id: 1 } }
     ]);
 
-    // Pending verifications
+    // Pending verifications (contributions with receipt uploaded but not verified)
     const pendingVerifications = await Contribution.countDocuments({
         status: 'pending',
         receipt: { $ne: null }

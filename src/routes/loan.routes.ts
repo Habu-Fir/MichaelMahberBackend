@@ -239,6 +239,11 @@ import {
   approvePayment,
   getPendingPayments
 } from '../controllers/loan.controller';
+import {
+  initiateDashenPayment,
+  dashenPaymentCallback,
+  checkDashenPaymentStatus
+} from '../controllers/dashenPayment.Controller';
 import Loan from '../models/Loan';
 
 const router = express.Router();
@@ -372,5 +377,24 @@ router.put('/:id/approve', authorize('approver', 'super_admin'), approveLoan);
 router.post('/:id/disburse', authorize('super_admin'), disburseLoan);
 router.post('/:id/approve-payment', authorize('super_admin'), validateApprovePayment, approvePayment);
 router.get('/admin/pending-payments', authorize('super_admin'), getPendingPayments);
+
+
+router.post(
+  '/dashen-payment/initiate',
+  protect,
+  authorize('member', 'admin', 'super_admin'),
+  initiateDashenPayment
+);
+
+router.post(
+  '/dashen-payment/callback',
+  dashenPaymentCallback  // Public endpoint - no auth required
+);
+
+router.get(
+  '/dashen-payment/status/:orderId',
+  protect,
+  checkDashenPaymentStatus
+);
 
 export default router;
