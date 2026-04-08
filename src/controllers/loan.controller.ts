@@ -7,7 +7,12 @@ import { AuthRequest } from '../middleware/auth';
 import { generateLoanNumber } from '../utils/generateLoanNumber';
 import systemConfigService from '../services/systemConfig.service';
 
-// ==================== HELPER: UPDATE LOAN INTEREST ====================
+
+// ==================== HELPER FUNCTIONS ====================
+const getDailyRate = (monthlyRate: number): number => {
+    return (monthlyRate / 100) / 30;
+};
+
 const updateLoanInterest = async (loan: any) => {
     const dailyRate = getDailyRate(loan.interestRate);
     const now = new Date();
@@ -28,10 +33,77 @@ const updateLoanInterest = async (loan: any) => {
     return 0;
 };
 
-// ==================== HELPER FUNCTIONS ====================
-const getDailyRate = (monthlyRate: number): number => {
-    return (monthlyRate / 100) / 30;
-};
+// ==================== UPDATE INTEREST FOR A LOAN ====================
+export const updateLoanInterestById = asyncHandler(async (
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+    console.log('💰 Updating interest for loan:', id);
+
+    // ✅ Validate ID format
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+        return next(new ErrorResponse('Invalid loan ID format', 400));
+    }
+
+    const loan = await Loan.findById(id);
+    if (!loan) {
+        return next(new ErrorResponse('Loan not found', 404));
+    }
+
+    // ✅ Only update interest for active loans
+    if (loan.status !== 'active') {
+        return res.status(200).json({
+            success: true,
+            message: 'Loan is not active. No interest calculated.',
+            data: {
+                interestAccrued: loan.interestAccrued,
+                daysDiff: 0,
+                newInterest: 0,
+                status: loan.status
+            }
+        });
+    }
+
+    const dailyRate = getDailyRate(loan.interestRate);
+    const now = new Date();
+    const lastCalc = loan.lastInterestCalculation || loan.disbursementDate || loan.requestDate;
+    const daysDiff = Math.floor((now.getTime() - new Date(lastCalc).getTime()) / (1000 * 60 * 60 * 24));
+
+    console.log(`Loan ${loan.loanNumber}: lastCalc=${lastCalc}, daysDiff=${daysDiff}, remainingPrincipal=${loan.remainingPrincipal}`);
+
+    let newInterest = 0;
+    if (daysDiff > 0) {
+        newInterest = loan.remainingPrincipal * dailyRate * daysDiff;
+        newInterest = Math.round(newInterest * 100) / 100;
+
+        loan.interestAccrued += newInterest;
+        loan.lastInterestCalculation = now;
+        await loan.save();
+
+        console.log(`✅ Added ${newInterest} ETB interest to loan ${loan.loanNumber}`);
+    } else {
+        console.log(`⚠️ No days difference for loan ${loan.loanNumber} (${daysDiff} days)`);
+    }
+
+    res.status(200).json({
+        success: true,
+        message: `Interest updated. Added ${newInterest} ETB`,
+        data: {
+            loanId: loan._id,
+            loanNumber: loan.loanNumber,
+            interestAccrued: loan.interestAccrued,
+            interestPaid: loan.interestPaid,
+            remainingPrincipal: loan.remainingPrincipal,
+            daysDiff: daysDiff,
+            newInterest: newInterest,
+            status: loan.status
+        }
+    });
+});
+
 
 // ==================== GET ALL LOANS (with pagination and filters) ====================
 export const getLoans = asyncHandler(async (
@@ -584,6 +656,7 @@ export const approvePayment = asyncHandler(async (
         }
     });
 });
+
 
 // ==================== GET PENDING PAYMENTS ====================
 export const getPendingPayments = asyncHandler(async (

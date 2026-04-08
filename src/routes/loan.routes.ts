@@ -237,7 +237,8 @@ import {
   disburseLoan,
   requestPayment,
   approvePayment,
-  getPendingPayments
+  getPendingPayments,
+  updateLoanInterestById
 } from '../controllers/loan.controller';
 import {
   initiateDashenPayment,
@@ -396,6 +397,7 @@ router.get(
   protect,
   checkDashenPaymentStatus
 );
+router.post('/:id/update-interest', protect, updateLoanInterestById);
 router.get('/test-version', (req, res) => {
   res.json({
     success: true,
