@@ -10,7 +10,6 @@ import loanRoutes from './routes/loan.routes';
 import contributionRoutes from './routes/contribution.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import systemRoutes from './routes/system.routes';
-import './jobs/updateDailyInterest';
 
 dotenv.config();
 
