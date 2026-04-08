@@ -7,6 +7,26 @@ import { AuthRequest } from '../middleware/auth';
 import { generateLoanNumber } from '../utils/generateLoanNumber';
 import systemConfigService from '../services/systemConfig.service';
 
+// ==================== HELPER: UPDATE LOAN INTEREST ====================
+const updateLoanInterest = async (loan: any) => {
+    const dailyRate = getDailyRate(loan.interestRate);
+    const now = new Date();
+    const lastCalc = loan.lastInterestCalculation || loan.disbursementDate || loan.requestDate;
+    const daysDiff = Math.floor((now.getTime() - new Date(lastCalc).getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysDiff > 0) {
+        const newInterest = loan.remainingPrincipal * dailyRate * daysDiff;
+        const roundedInterest = Math.round(newInterest * 100) / 100;
+
+        loan.interestAccrued += roundedInterest;
+        loan.lastInterestCalculation = now;
+        await loan.save();
+
+        console.log(`✅ Updated interest for loan ${loan.loanNumber}: +${roundedInterest} ETB (${daysDiff} days)`);
+        return roundedInterest;
+    }
+    return 0;
+};
 
 // ==================== HELPER FUNCTIONS ====================
 const getDailyRate = (monthlyRate: number): number => {
